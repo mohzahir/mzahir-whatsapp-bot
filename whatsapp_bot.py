@@ -19,7 +19,7 @@ ADMIN_WA_NUMBER = '249117017444' # <== أضف هذا السطر
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaTgVL9m4NlA@ep-nameless-butterfly-ada3hsu3-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 
 # 🔗 رابط قناة الواتساب الجديدة (قم بتعديله لاحقاً)
-WA_CHANNEL_LINK = "https://whatsapp.com/channel/YOUR_CHANNEL_LINK_HERE"
+WA_CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDXBPq8V0toBVu2CE41"
 
 FOOTER = "\n\nــــــــــــــــــــــــــــــــــــــــ\n0️⃣ ❌ لإلغاء الطلب والعودة للقائمة\n🎧 للدعم الفني المباشر: wa.me/249117017444"
 
