@@ -75,10 +75,15 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
     # --- القائمة الرئيسية ---
     if not state:
         # نظام التقييم السريع: إذا أرسل رقم من 1 إلى 5 وليس في طلب، نعتبره تقييم لطلبه الأخير
-        if msg_text in ["1", "2", "3", "4", "5"]:
-            user_states[sender_phone] = {'step': 'write_review', 'stars': int(msg_text)}
-            send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
-            return
+        if msg_text.startswith("تقييم"):
+            try:
+                stars = int(msg_text.replace("تقييم", "").strip())
+                if 1 <= stars <= 5:
+                    user_states[sender_phone] = {'step': 'write_review', 'stars': stars}
+                    send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
+                    return
+            except:
+                pass
 
         if msg_text == "1": # شراء
             if not settings['allow_buy']: return send_whatsapp_message(sender_phone, "🔷 خدمة الشراء متوقفة مؤقتاً." + FOOTER)
@@ -112,14 +117,16 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
         elif msg_text == "5": # حالة
             status = "🟢 التاجر متصل وجاهز (التنفيذ 1-15 دقيقة)" if not settings['is_busy'] else "⏱️ التاجر في وضع الانشغال حالياً"
             send_whatsapp_message(sender_phone, f"📡 *حالة المنصة:* {status}" + FOOTER)
-        elif msg_text == "6": # تقييمات
+        elif msg_text == "6": # تقييمات (تم إصلاح تنسيق الواتساب هنا)
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute('SELECT stars, comment FROM reviews ORDER BY review_date DESC LIMIT 5')
             rows = cursor.fetchall()
             conn.close()
             txt = "🌟 *آراء عملائنا:*\n\n"
-            for r in rows: txt += f"{'⭐'*r[0]}\n💬 \"{r[1]}\"\n\n"
+            for r in rows: 
+                # إزالة علامات التنصيص واستخدام الخط المائل (_) لحل مشكلة اتجاه النص في واتساب
+                txt += f"{'⭐'*r[0]}\n💬 _{r[1]}_\n\n" 
             send_whatsapp_message(sender_phone, txt if rows else "لا توجد تقييمات بعد." + FOOTER)
         elif msg_text == "7": # إثبات
             send_whatsapp_message(sender_phone, "🛡️ *الأمان والثقة المؤسسية*\n\nحساب تاجر موثق (KYC) في Binance P2P بسجل حافل.\nالرابط لملفنا الموثق:\nhttps://www.binance.com/en/qr/dplkdf9e9827882d42e49f144ad09998fd0d" + FOOTER)
