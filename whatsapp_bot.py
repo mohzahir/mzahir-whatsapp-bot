@@ -15,6 +15,7 @@ PHONE_NUMBER_ID = '1162606406942576'
 TELEGRAM_BOT_TOKEN = '8627720505:AAHZB7HNeGBP9k8eYJLy-D7mxbsDfOhu-Nc'
 ADMIN_ID = 7197788608
 CHANNEL_USERNAME = "@MZahir_P2P"
+ADMIN_WA_NUMBER = '249117017444' # <== أضف هذا السطر
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaTgVL9m4NlA@ep-nameless-butterfly-ada3hsu3-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 
 # 🔗 رابط قناة الواتساب الجديدة (قم بتعديله لاحقاً)
@@ -251,6 +252,10 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         stars_display = "⭐" * stars
         review_msg = f"🌟 <b>تقييم جديد من عملاء الواتساب</b> 🌟\n\n👤 <b>العميل:</b> {name}\n⭐️ <b>التقييم:</b> {stars_display}\n\n💬 <i>\"{comment}\"</i>\n\nــــــــــــــــــــــــــــــــــــــ\n🤖 <b>للتداول:</b> {CHANNEL_USERNAME}"
         notify_telegram_admin_text(review_msg, send_to_channel=True)
+
+        # --- الجديد: إرسال التقييم لجوالك في واتساب لتحويله للقناة ---
+        wa_review_msg = f"📣 *منشور جاهز للقناة (اضغط تحويل)*:\n\n🌟 *تقييم جديد من عملائنا* 🌟\n\n{stars_display}\n\n💬 \"{comment}\""
+        send_whatsapp_message(ADMIN_WA_NUMBER, wa_review_msg)
 
     elif state == 'buy_amount':
         try:
