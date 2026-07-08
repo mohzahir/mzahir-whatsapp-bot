@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import psycopg2
 import os
+import json
 
 app = Flask(__name__)
 
@@ -16,13 +17,12 @@ ADMIN_ID = 7197788608
 CHANNEL_USERNAME = "@MZahir_P2P"
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaTgVL9m4NlA@ep-nameless-butterfly-ada3hsu3-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 
-# التذييل الدائم لكل رسائل الواتساب
 FOOTER = "\n\nــــــــــــــــــــــــــــــــــــــــ\n0️⃣ ❌ لإلغاء الطلب والعودة للقائمة\n🎧 للدعم الفني المباشر: wa.me/249117017444"
 
 user_states = {}
 
 # ==========================================
-# دوال المساعدة
+# دوال المساعدة للبيانات
 # ==========================================
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -44,26 +44,86 @@ def is_user_registered(phone):
     conn.close()
     return result
 
+def has_pending_order(phone):
+    """دالة تفحص ما إذا كان العميل لديه طلب قيد التنفيذ لمنعه من التلاعب"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM orders WHERE user_id = %s AND status = 'PENDING'", (int(phone),))
+    result = cursor.fetchone()
+    conn.close()
+    return bool(result)
+
+# ==========================================
+# دوال إرسال واستقبال الميديا والرسائل
+# ==========================================
 def send_whatsapp_message(to_phone, text):
     url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to_phone, "type": "text", "text": {"body": text}}
     requests.post(url, headers=headers, json=payload)
 
-def notify_telegram_admin(text, send_to_channel=False):
+def get_whatsapp_media(media_id):
+    """تنزيل صورة الإشعار من خوادم ميتا المشفرة"""
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    # 1. جلب رابط الصورة
+    res = requests.get(f"https://graph.facebook.com/v17.0/{media_id}", headers=headers)
+    if res.status_code == 200:
+        media_url = res.json().get('url')
+        # 2. تنزيل الصورة
+        media_res = requests.get(media_url, headers=headers)
+        if media_res.status_code == 200:
+            return media_res.content
+    return None
+
+def notify_telegram_admin_with_photo(photo_bytes, caption, order_id):
+    """إرسال الصورة للأدمن في تيليجرام مع أزرار التحكم"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    files = {'photo': ('receipt.jpg', photo_bytes, 'image/jpeg')}
+    reply_markup = {
+        "inline_keyboard": [
+            [{"text": "🔄 جاري المعالجة (تطمين العميل)", "callback_data": f"process_order_{order_id}"}],
+            [{"text": "✅ تأكيد وإكمال", "callback_data": f"approve_order_{order_id}"},
+             {"text": "❌ رفض الطلب", "callback_data": f"reject_order_{order_id}"}]
+        ]
+    }
+    data = {'chat_id': ADMIN_ID, 'caption': caption, 'parse_mode': 'Markdown', 'reply_markup': json.dumps(reply_markup)}
+    requests.post(url, files=files, data=data)
+
+def notify_telegram_admin_text(text, send_to_channel=False, order_id=None):
+    """إرسال إشعار نصي للأدمن أو للقناة"""
     target = CHANNEL_USERNAME if send_to_channel else ADMIN_ID
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': target, 'text': text, 'parse_mode': 'HTML' if send_to_channel else 'Markdown'}
+    
+    if order_id and not send_to_channel:
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "🔄 جاري المعالجة (تطمين العميل)", "callback_data": f"process_order_{order_id}"}],
+                [{"text": "✅ تأكيد وإكمال", "callback_data": f"approve_order_{order_id}"},
+                 {"text": "❌ رفض الطلب", "callback_data": f"reject_order_{order_id}"}]
+            ]
+        }
+        payload['reply_markup'] = json.dumps(reply_markup)
+        
     requests.post(url, json=payload)
 
 # ==========================================
 # المنطق الأساسي للردود (WhatsApp Logic)
 # ==========================================
-def handle_whatsapp_message(sender_phone, msg_text, msg_type):
+def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     global user_states
     msg_text = str(msg_text).strip() if msg_text else ""
     
-    # --- الإلغاء والعودة للقائمة ---
+    # 🔒 جدار الحماية والثقة: منع أي إجراء إذا كان هناك طلب قيد التنفيذ
+    if has_pending_order(sender_phone):
+        if msg_text == "0":
+            trust_msg = "🛡️ *إجراء أمني:*\n\nعذراً، لا يمكن إلغاء الطلب بعد رفع إشعار الدفع حفاظاً على حقوقك المالية.\n\nلا تقلق، طلبك الآن في أيادي أمينة وقيد المراجعة من قبل الإدارة. سيتم إرسال إشعار التنفيذ لك هنا خلال لحظات..."
+        else:
+            trust_msg = "🕒 *طلبك قيد التنفيذ*\n\nنحن نقوم بمراجعة إشعارك المالي الآن. التنفيذ يتم آلياً خلال 1-15 دقيقة كحد أقصى.\n\n🛡️ منصتنا تضمن لك حقك بالكامل، شكراً لثقتك بنا!"
+        send_whatsapp_message(sender_phone, trust_msg)
+        return
+
+    # --- الإلغاء والعودة للقائمة (إذا لم يكن هناك طلب معلق) ---
     if msg_text == "0":
         if sender_phone in user_states: del user_states[sender_phone]
         send_whatsapp_message(sender_phone, "🚫 تم إلغاء الطلب بأمان.\nأرسل (مرحبا) للبدء من جديد أو لعرض القائمة." + FOOTER)
@@ -74,7 +134,6 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
 
     # --- القائمة الرئيسية ---
     if not state:
-        # نظام التقييم السريع: إذا أرسل رقم من 1 إلى 5 وليس في طلب، نعتبره تقييم لطلبه الأخير
         if msg_text.startswith("تقييم"):
             try:
                 stars = int(msg_text.replace("تقييم", "").strip())
@@ -82,8 +141,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
                     user_states[sender_phone] = {'step': 'write_review', 'stars': stars}
                     send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
                     return
-            except:
-                pass
+            except: pass
 
         if msg_text == "1": # شراء
             if not settings['allow_buy']: return send_whatsapp_message(sender_phone, "🔷 خدمة الشراء متوقفة مؤقتاً." + FOOTER)
@@ -117,16 +175,14 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
         elif msg_text == "5": # حالة
             status = "🟢 التاجر متصل وجاهز (التنفيذ 1-15 دقيقة)" if not settings['is_busy'] else "⏱️ التاجر في وضع الانشغال حالياً"
             send_whatsapp_message(sender_phone, f"📡 *حالة المنصة:* {status}" + FOOTER)
-        elif msg_text == "6": # تقييمات (تم إصلاح تنسيق الواتساب هنا)
+        elif msg_text == "6": # تقييمات
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute('SELECT stars, comment FROM reviews ORDER BY review_date DESC LIMIT 5')
             rows = cursor.fetchall()
             conn.close()
             txt = "🌟 *آراء عملائنا:*\n\n"
-            for r in rows: 
-                # إزالة علامات التنصيص واستخدام الخط المائل (_) لحل مشكلة اتجاه النص في واتساب
-                txt += f"{'⭐'*r[0]}\n💬 _{r[1]}_\n\n" 
+            for r in rows: txt += f"{'⭐'*r[0]}\n💬 _{r[1]}_\n\n"
             send_whatsapp_message(sender_phone, txt if rows else "لا توجد تقييمات بعد." + FOOTER)
         elif msg_text == "7": # إثبات
             send_whatsapp_message(sender_phone, "🛡️ *الأمان والثقة المؤسسية*\n\nحساب تاجر موثق (KYC) في Binance P2P بسجل حافل.\nالرابط لملفنا الموثق:\nhttps://www.binance.com/en/qr/dplkdf9e9827882d42e49f144ad09998fd0d" + FOOTER)
@@ -163,7 +219,6 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
         conn.close()
         send_whatsapp_message(sender_phone, "🎉 تم توثيق حسابك بنجاح!")
         
-        # استكمال ما كان يريده العميل
         nxt = user_states[sender_phone].get('next_action')
         if nxt == 'buy':
             user_states[sender_phone] = {'step': 'buy_amount'}
@@ -192,10 +247,9 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
         del user_states[sender_phone]
         send_whatsapp_message(sender_phone, "❤️ شكرًا جزيلاً لك على وقتك ورأيك الجميل!" + FOOTER)
         
-        # النشر في القناة
         stars_display = "⭐" * stars
         review_msg = f"🌟 <b>تقييم جديد من عملاء الواتساب</b> 🌟\n\n👤 <b>العميل:</b> {name}\n⭐️ <b>التقييم:</b> {stars_display}\n\n💬 <i>\"{comment}\"</i>\n\nــــــــــــــــــــــــــــــــــــــ\n🤖 <b>للتداول:</b> {CHANNEL_USERNAME}"
-        notify_telegram_admin(review_msg, send_to_channel=True)
+        notify_telegram_admin_text(review_msg, send_to_channel=True)
 
     # --- مسار الشراء ---
     elif state == 'buy_amount':
@@ -215,7 +269,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
         send_whatsapp_message(sender_phone, text)
 
     elif state == 'buy_receipt':
-        if msg_type == 'image':
+        if msg_type == 'image' and image_id:
             order = user_states[sender_phone]
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -223,8 +277,18 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
             order_id = cursor.fetchone()[0]
             conn.commit()
             conn.close()
-            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام!* جاري المعالجة..." + FOOTER)
-            notify_telegram_admin(f"🚨 *طلب شراء واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nيطلب: `{order['amount']}` USDT\nدفع: `{order['total_sdg']}` جنيه\nالمحفظة:\n`{order['wallet']}`")
+            
+            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\nطلبك الآن قيد المراجعة. سيتم تحويل الـ USDT لك خلال لحظات...\n(الرجاء عدم إرسال رسائل أخرى حتى يكتمل طلبك).")
+            
+            # جلب الصورة من واتساب وإرسالها لتيليجرام
+            photo_bytes = get_whatsapp_media(image_id)
+            admin_alert = f"🚨 *طلب شراء واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nيطلب: `{order['amount']}` USDT\nدفع: `{order['total_sdg']}` جنيه\nالمحفظة:\n`{order['wallet']}`"
+            
+            if photo_bytes:
+                notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
+            else:
+                notify_telegram_admin_text(admin_alert + "\n\n⚠️ (تنبيه: فشل تحميل صورة الإشعار من سيرفر ميتا، يرجى مراجعتها في الواتساب)", False, order_id)
+                
             del user_states[sender_phone]
         else: send_whatsapp_message(sender_phone, "⚠️ أرسل *صورة* الإشعار فقط." + FOOTER)
 
@@ -251,7 +315,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
         send_whatsapp_message(sender_phone, text)
 
     elif state == 'sell_receipt':
-        if msg_type == 'image':
+        if msg_type == 'image' and image_id:
             order = user_states[sender_phone]
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -259,8 +323,18 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
             order_id = cursor.fetchone()[0]
             conn.commit()
             conn.close()
-            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام!* جاري المعالجة..." + FOOTER)
-            notify_telegram_admin(f"🚨 *طلب بيع واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nأرسل: `{order['amount']}` USDT\nيجب تحويل: *{order['total_sdg']}* جنيه\nلحساب:\n`{order['client_bank']}`")
+            
+            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\nطلبك الآن قيد المراجعة. سيتم تحويل الجنيهات لحسابك خلال لحظات...\n(الرجاء عدم إرسال رسائل أخرى حتى يكتمل طلبك).")
+            
+            # جلب الصورة من واتساب وإرسالها لتيليجرام
+            photo_bytes = get_whatsapp_media(image_id)
+            admin_alert = f"🚨 *طلب بيع واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nأرسل: `{order['amount']}` USDT\nيجب تحويل: *{order['total_sdg']}* جنيه\nلحساب:\n`{order['client_bank']}`"
+            
+            if photo_bytes:
+                notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
+            else:
+                notify_telegram_admin_text(admin_alert + "\n\n⚠️ (تنبيه: فشل تحميل صورة الإشعار من سيرفر ميتا، يرجى مراجعتها في الواتساب)", False, order_id)
+                
             del user_states[sender_phone]
         else: send_whatsapp_message(sender_phone, "⚠️ أرسل *صورة* التحويل فقط." + FOOTER)
 
@@ -291,14 +365,13 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type):
             neg_order = order['neg_order']
             total = amount * price
             
-            # نغلق مسار الواتساب هنا وننتظر أدمن تيليجرام ليرد (أو نعامله كطلب قيد الانتظار)
             send_whatsapp_message(sender_phone, f"⏳ *تم رفع العرض!*\n{amount} USDT بسعر {price}\nالإجمالي: {total}\n\nالرجاء الانتظار قليلاً للرد من الإدارة..." + FOOTER)
             
             user_info = is_user_registered(sender_phone)
             name = user_info[0] if user_info else "العميل"
             op_text = "شراء" if neg_order == 'buy' else "بيع"
             
-            notify_telegram_admin(f"🤝 *طلب تفاوض واتساب!*\n👤 العميل: `{name}`\n[💬 راسله واتساب](wa.me/{sender_phone})\nيرغب في: **{op_text}**\nالكمية: `{amount}`\nالسعر المعروض: `{price}`\n\n*(قم بمراسلته مباشرة على واتساب للاتفاق أو قبول العرض)*")
+            notify_telegram_admin_text(f"🤝 *طلب تفاوض واتساب!*\n👤 العميل: `{name}`\n[💬 راسله واتساب](wa.me/{sender_phone})\nيرغب في: **{op_text}**\nالكمية: `{amount}`\nالسعر المعروض: `{price}`\n\n*(قم بمراسلته مباشرة على واتساب للاتفاق أو قبول العرض)*")
             del user_states[sender_phone]
         except: send_whatsapp_message(sender_phone, "⚠️ أرقام فقط." + FOOTER)
 
@@ -323,8 +396,17 @@ def webhook():
                 message_data = value['messages'][0]
                 sender_phone = message_data['from']
                 msg_type = message_data.get('type')
-                msg_text = message_data['text']['body'] if msg_type == 'text' else ""
-                handle_whatsapp_message(sender_phone, msg_text, msg_type)
+                
+                # التقاط الصورة أو النص
+                msg_text = ""
+                image_id = None
+                
+                if msg_type == 'text':
+                    msg_text = message_data['text']['body']
+                elif msg_type == 'image':
+                    image_id = message_data['image']['id']
+                
+                handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id)
         except Exception as e: pass
         return jsonify({"status": "success"}), 200
 
