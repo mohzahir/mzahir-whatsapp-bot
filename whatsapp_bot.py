@@ -17,7 +17,7 @@ ADMIN_ID = 7197788608
 CHANNEL_USERNAME = "@MZahir_P2P"
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaTgVL9m4NlA@ep-nameless-butterfly-ada3hsu3-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 
-WA_CHANNEL_LINK = "https://whatsapp.com/channel/YOUR_CHANNEL_LINK_HERE"
+WA_CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDXBPq8V0toBVu2CE41"
 
 # تذييل ثابت لدعم الثقة والتواصل
 FOOTER = "\n\nــــــــــــــــــــــــــــــــــــــــ\n0️⃣ ❌ لإلغاء الطلب والعودة للقائمة\n🎧 للدعم الفني المباشر (دائماً في خدمتك): wa.me/249117017444"
