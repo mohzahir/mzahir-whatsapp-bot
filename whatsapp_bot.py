@@ -280,8 +280,15 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     elif state == 'buy_wallet':
         user_states[sender_phone].update({'wallet': msg_text, 'step': 'buy_receipt'})
         order = user_states[sender_phone]
-        text = (f"🛡️ *خطوة أخيرة*\n🔹 الكمية: {order['amount']} USDT\n🔹 المحفظة: {order['wallet']}\n🔹 المبلغ: *{order['total_sdg']} جنيه*\n\n"
-                f"🏦 *حسابنا (بنكك):*\n`3290549`\nمحمد زاهر عبدالله علي\n\n📸 *أرسل صورة إشعار الدفع هنا (صورة فقط).*" + FOOTER)
+        text = (f"🛡️ *خطوة أخيرة*\n"
+                f"🔹 الكمية: {order['amount']} USDT\n"
+                f"🔹 المحفظة: {order['wallet']}\n"
+                f"🔹 المبلغ: *{order['total_sdg']} جنيه*\n\n"
+                f"🏦 *حسابنا (بنكك):*\n"
+                f"• الحساب: `3290549`\n"
+                f"• الاسم: محمد زاهر عبدالله علي\n"
+                f"• التعليق: الى محمد زاهر مقابل خدمة الكترونية\n\n"
+                f"📸 *أرسل صورة إشعار الدفع هنا (صورة فقط).*" + FOOTER)
         send_whatsapp_message(sender_phone, text)
 
     elif state == 'buy_receipt':
@@ -388,7 +395,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             notify_telegram_admin_text(f"🤝 *طلب تفاوض واتساب!*\n👤 العميل: `{name}`\n[💬 راسله واتساب](wa.me/{sender_phone})\nيرغب في: **{op_text}**\nالكمية: `{amount}`\nالسعر المعروض: `{price}`\n\n*(قم بمراسلته مباشرة على واتساب للاتفاق أو قبول العرض)*")
             del user_states[sender_phone]
         except: send_whatsapp_message(sender_phone, "⚠️ أرقام فقط." + FOOTER)
-        
+
 # ==========================================
 # الصفحة الرئيسية للسيرفر (إثبات التشغيل)
 # ==========================================
