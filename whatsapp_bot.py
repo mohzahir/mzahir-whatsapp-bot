@@ -63,6 +63,14 @@ def has_pending_order(phone):
     conn.close()
     return bool(result)
 
+def get_user_stats(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM orders WHERE user_id = %s AND status = 'COMPLETED'", (int(user_id),))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
 # ==========================================
 # دوال إرسال واستقبال الميديا والرسائل
 # ==========================================
@@ -140,14 +148,13 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     settings = get_bot_settings()
 
     if not state:
-        if msg_text.startswith("تقييم"):
-            try:
-                stars = int(msg_text.replace("تقييم", "").strip())
-                if 1 <= stars <= 5:
-                    user_states[sender_phone] = {'step': 'write_review', 'stars': stars}
-                    send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
-                    return
-            except: pass
+        # نظام التقييم الذكي: مجرد إرسال نجوم سيتم احتساب التقييم
+        star_count = msg_text.count('⭐') + msg_text.count('⭐️') + msg_text.count('🌟')
+        if star_count > 0:
+            stars = min(5, star_count)
+            user_states[sender_phone] = {'step': 'write_review', 'stars': stars}
+            send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
+            return
 
         # 🚫 منع الطلبات في وضع الانشغال
         if msg_text in ["1", "2", "3"] and settings['is_busy']:
@@ -305,7 +312,23 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\n✅ جارٍ التحقق من الإشعار والبنك...\n✅ جارٍ تجهيز الأموال للتحويل...\n(سيصلك إشعار التنفيذ النهائي وإيصال التحويل قريباً، يرجى الانتظار)" + FOOTER)
             
             photo_bytes = get_whatsapp_media(image_id)
-            admin_alert = f"🚨 *طلب شراء واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nيطلب: `{order['amount']}` USDT\nدفع: `{order['total_sdg']}` جنيه\nالمحفظة:\n`{order['wallet']}`"
+            user_info = is_user_registered(sender_phone)
+            full_name = user_info[0] if user_info else "غير مسجل"
+            bank_account = user_info[1] if user_info else "غير مسجل"
+            completed_orders = get_user_stats(sender_phone)
+            trust_badge = "🟢 (عميل موثوق)" if completed_orders > 0 else "🟡 (عميل جديد)"
+            
+            admin_alert = (
+                f"🚨 *طلب شراء واتساب!* `#{order_id}`\n\n"
+                f"👤 الاسم: `{full_name}`\n"
+                f"📱 الهاتف: `+{sender_phone}`\n"
+                f"💳 بنكك المُسجل: `{bank_account}`\n"
+                f"📦 طلبات سابقة ناجحة: *{completed_orders}* {trust_badge}\n"
+                f"🔗 [💬 مراسلة واتساب](wa.me/{sender_phone})\n\n"
+                f"يطلب: `{order['amount']}` USDT\n"
+                f"دفع: `{order['total_sdg']}` جنيه\n"
+                f"المحفظة:\n`{order['wallet']}`"
+            )
             
             if photo_bytes:
                 notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
@@ -350,7 +373,21 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\n✅ جارٍ التحقق من التحويل...\n✅ جارٍ تجهيز الجنيهات للإرسال إلى بنكك...\n(سيصلك إشعار التنفيذ وإيصال التحويل قريباً، يرجى الانتظار)" + FOOTER)
             
             photo_bytes = get_whatsapp_media(image_id)
-            admin_alert = f"🚨 *طلب بيع واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nأرسل: `{order['amount']}` USDT\nيجب تحويل: *{order['total_sdg']}* جنيه\nلحساب:\n`{order['client_bank']}`"
+            user_info = is_user_registered(sender_phone)
+            full_name = user_info[0] if user_info else "غير مسجل"
+            completed_orders = get_user_stats(sender_phone)
+            trust_badge = "🟢 (عميل موثوق)" if completed_orders > 0 else "🟡 (عميل جديد)"
+            
+            admin_alert = (
+                f"🚨 *طلب بيع واتساب!* `#{order_id}`\n\n"
+                f"👤 الاسم: `{full_name}`\n"
+                f"📱 الهاتف: `+{sender_phone}`\n"
+                f"📦 طلبات سابقة ناجحة: *{completed_orders}* {trust_badge}\n"
+                f"🔗 [💬 مراسلة واتساب](wa.me/{sender_phone})\n\n"
+                f"أرسل: `{order['amount']}` USDT\n"
+                f"يجب تحويل: *{order['total_sdg']}* جنيه\n"
+                f"لحساب:\n`{order['client_bank']}`"
+            )
             
             if photo_bytes:
                 notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
@@ -395,13 +432,6 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             notify_telegram_admin_text(f"🤝 *طلب تفاوض واتساب!*\n👤 العميل: `{name}`\n[💬 راسله واتساب](wa.me/{sender_phone})\nيرغب في: **{op_text}**\nالكمية: `{amount}`\nالسعر المعروض: `{price}`\n\n*(قم بمراسلته مباشرة على واتساب للاتفاق أو قبول العرض)*")
             del user_states[sender_phone]
         except: send_whatsapp_message(sender_phone, "⚠️ أرقام فقط." + FOOTER)
-
-# ==========================================
-# الصفحة الرئيسية للسيرفر (إثبات التشغيل)
-# ==========================================
-@app.route('/', methods=['GET'])
-def index():
-    return "🚀 MZahir Exchange - WhatsApp Bot Server is Running Successfully!", 200
 
 # ==========================================
 # الخادم المستضيف (Webhook Server)
