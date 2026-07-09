@@ -15,13 +15,12 @@ PHONE_NUMBER_ID = '1162606406942576'
 TELEGRAM_BOT_TOKEN = '8627720505:AAHZB7HNeGBP9k8eYJLy-D7mxbsDfOhu-Nc'
 ADMIN_ID = 7197788608
 CHANNEL_USERNAME = "@MZahir_P2P"
-ADMIN_WA_NUMBER = '249117017444' # <== أضف هذا السطر
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaTgVL9m4NlA@ep-nameless-butterfly-ada3hsu3-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 
-# 🔗 رابط قناة الواتساب الجديدة (قم بتعديله لاحقاً)
-WA_CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDXBPq8V0toBVu2CE41"
+WA_CHANNEL_LINK = "https://whatsapp.com/channel/YOUR_CHANNEL_LINK_HERE"
 
-FOOTER = "\n\nــــــــــــــــــــــــــــــــــــــــ\n0️⃣ ❌ لإلغاء الطلب والعودة للقائمة\n🎧 للدعم الفني المباشر: wa.me/249117017444"
+# تذييل ثابت لدعم الثقة والتواصل
+FOOTER = "\n\nــــــــــــــــــــــــــــــــــــــــ\n0️⃣ ❌ لإلغاء الطلب والعودة للقائمة\n🎧 للدعم الفني المباشر (دائماً في خدمتك): wa.me/249117017444"
 
 user_states = {}
 
@@ -47,6 +46,14 @@ def is_user_registered(phone):
     result = cursor.fetchone()
     conn.close()
     return result
+
+def is_user_banned(phone):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM banned_users WHERE user_id = %s', (int(phone),))
+    result = cursor.fetchone()
+    conn.close()
+    return bool(result)
 
 def has_pending_order(phone):
     conn = get_db_connection()
@@ -112,12 +119,16 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     global user_states
     msg_text = str(msg_text).strip() if msg_text else ""
     
+    # 🚫 الفحص الأمني (الحظر)
+    if is_user_banned(sender_phone):
+        return send_whatsapp_message(sender_phone, "⛔️ عذراً، حسابك محظور من استخدام النظام بسبب مخالفة شروط الاستخدام.")
+
     if has_pending_order(sender_phone):
         if msg_text == "0":
-            trust_msg = "🛡️ *إجراء أمني:*\n\nعذراً، لا يمكن إلغاء الطلب بعد رفع إشعار الدفع حفاظاً على حقوقك المالية.\n\nلا تقلق، طلبك الآن في أيادي أمينة وقيد المراجعة من قبل الإدارة. سيتم إرسال إشعار التنفيذ لك هنا خلال لحظات..."
+            trust_msg = "🛡️ *إجراء أمني:*\nعذراً، لا يمكن إلغاء الطلب بعد رفع إشعار الدفع حفاظاً على حقوقك المالية.\n\nلا تقلق، طلبك الآن في أيادي أمينة وقيد المراجعة. سيتم إرسال إشعار التنفيذ لك هنا خلال لحظات..."
         else:
-            trust_msg = "🕒 *طلبك قيد التنفيذ*\n\nنحن نقوم بمراجعة إشعارك المالي الآن. التنفيذ يتم آلياً خلال 1-15 دقيقة كحد أقصى.\n\n🛡️ منصتنا تضمن لك حقك بالكامل، شكراً لثقتك بنا!"
-        send_whatsapp_message(sender_phone, trust_msg)
+            trust_msg = "🕒 *طلبك قيد التنفيذ*\n✅ جارٍ التحقق من الإشعار والبنك...\n✅ جارٍ تجهيز التحويل...\n\n🛡️ منصتنا تضمن لك حقك بالكامل، سيصلك إشعار التنفيذ قريباً!"
+        send_whatsapp_message(sender_phone, trust_msg + FOOTER)
         return
 
     if msg_text == "0":
@@ -138,6 +149,10 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                     return
             except: pass
 
+        # 🚫 منع الطلبات في وضع الانشغال
+        if msg_text in ["1", "2", "3"] and settings['is_busy']:
+            return send_whatsapp_message(sender_phone, "⏱️ عذراً، التاجر في وضع الانشغال أو خارج أوقات العمل حالياً. يرجى المحاولة لاحقاً." + FOOTER)
+
         if msg_text == "1":
             if not settings['allow_buy']: return send_whatsapp_message(sender_phone, "🔷 خدمة الشراء متوقفة مؤقتاً." + FOOTER)
             if not is_user_registered(sender_phone):
@@ -145,7 +160,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                 send_whatsapp_message(sender_phone, "🛡️ مرحباً بك. لضمان أمان المعاملات، يرجى ملء بيانات التحقق لمرة واحدة فقط.\n\n👤 الرجاء كتابة *اسمك الكامل* (كما يظهر في تطبيق بنكك):" + FOOTER)
                 return
             user_states[sender_phone] = {'step': 'buy_amount'}
-            send_whatsapp_message(sender_phone, f"🟢 *طلب شراء USDT*\nالسيولة المتوفرة: {settings['usdt_balance']} USDT\n\nالرجاء كتابة الكمية التي ترغب في شرائها (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🟢 *طلب شراء USDT*\nالسيولة المتوفرة: {settings['usdt_balance']} USDT\n\n💡 *نصيحة: لضمان راحتك وتجربة مصداقيتنا، يمكنك البدء بمبلغ صغير للتجربة أولاً.*\n\nالرجاء كتابة الكمية التي ترغب في شرائها (رقم فقط):" + FOOTER)
             
         elif msg_text == "2":
             if not settings['allow_sell']: return send_whatsapp_message(sender_phone, "🔷 خدمة البيع متوقفة مؤقتاً." + FOOTER)
@@ -155,7 +170,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                 return
             max_buy = round(settings['sdg_balance'] / settings['buy'], 2) if settings['buy'] > 0 else 0
             user_states[sender_phone] = {'step': 'sell_amount'}
-            send_whatsapp_message(sender_phone, f"🔵 *طلب بيع USDT*\nالحد الأقصى لاستيعابنا: {max_buy} USDT\n\nالرجاء كتابة الكمية التي ترغب في بيعها لنا (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🔵 *طلب بيع USDT*\nالحد الأقصى لاستيعابنا: {max_buy} USDT\n\n💡 *نصيحة: لضمان راحتك وتجربة مصداقيتنا، يمكنك البدء بمبلغ صغير للتجربة أولاً.*\n\nالرجاء كتابة الكمية التي ترغب في بيعها لنا (رقم فقط):" + FOOTER)
             
         elif msg_text == "3":
             if not is_user_registered(sender_phone):
@@ -184,18 +199,18 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                 f"🛡️ *الأمان والثقة المؤسسية*\n\n"
                 f"✅ يمكنك متابعة صفقاتنا الحية وتقييمات عملائنا عبر قناتنا الرسمية على واتساب:\n"
                 f"{WA_CHANNEL_LINK}\n\n"
-                f"✅ كما نملك حساب تاجر موثق (KYC) في Binance P2P بسجل حافل. رابط الحساب:\n"
+                f"✅ حساب تاجر موثق (KYC) في Binance P2P بسجل حافل:\n"
                 f"https://www.binance.com/en/qr/dplkdf9e9827882d42e49f144ad09998fd0d"
             )
             send_whatsapp_message(sender_phone, trust_msg + FOOTER)
         elif msg_text == "8":
-            send_whatsapp_message(sender_phone, "💡 *كيف يعمل النظام؟*\nتختار الخدمة > نرسل التفاصيل > ترفق الإشعار > المعالجة خلال 15 دقيقة بحد أقصى.\n\nفي حال التأخير لك حق المطالبة باسترجاع أموالك فوراً." + FOOTER)
+            send_whatsapp_message(sender_phone, "💡 *كيف يعمل النظام؟*\nتختار الخدمة > نرسل التفاصيل > ترفق الإشعار > المعالجة خلال 15 دقيقة بحد أقصى.\n\n🛡️ *ضمان الاسترداد:* في حال التأخير غير المبرر، لك كامل الحق في المطالبة باسترجاع أموالك فوراً." + FOOTER)
         else:
             status = "🟢 متصل الآن" if not settings['is_busy'] else "⏱️ وضع الانشغال"
             welcome = (
                 f"مرحباً بك في منصة تداول USDT الآمنة 🚀\n"
                 f"📡 حالة التاجر: {status}\n\n"
-                f"💡 *عروض حصرية:* تابع قناتنا على واتساب لمتابعة التقييمات الحية وأسعار الحرق:\n"
+                f"💡 *عروض حصرية:* تابع قناتنا على واتساب لمتابعة التقييمات الحية:\n"
                 f"{WA_CHANNEL_LINK}\n\n"
                 f"يرجى إرسال الرقم المطلوب:\n"
                 f"1️⃣ 🟢 شراء USDT\n"
@@ -225,11 +240,11 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         nxt = user_states[sender_phone].get('next_action')
         if nxt == 'buy':
             user_states[sender_phone] = {'step': 'buy_amount'}
-            send_whatsapp_message(sender_phone, f"🟢 *شراء USDT*\nالكمية المتوفرة: {settings['usdt_balance']}\nاكتب الكمية (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🟢 *شراء USDT*\nالكمية المتوفرة: {settings['usdt_balance']}\n\n💡 *نصيحة:* ابدأ بمبلغ صغير للتجربة واختبار السرعة.\nاكتب الكمية (رقم فقط):" + FOOTER)
         elif nxt == 'sell':
             max_buy = round(settings['sdg_balance'] / settings['buy'], 2) if settings['buy'] > 0 else 0
             user_states[sender_phone] = {'step': 'sell_amount'}
-            send_whatsapp_message(sender_phone, f"🔵 *بيع USDT*\nالحد الأقصى: {max_buy}\nاكتب الكمية (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🔵 *بيع USDT*\nالحد الأقصى: {max_buy}\n\n💡 *نصيحة:* ابدأ بمبلغ صغير للتجربة واختبار السرعة.\nاكتب الكمية (رقم فقط):" + FOOTER)
         elif nxt == 'neg':
             user_states[sender_phone] = {'step': 'neg_type'}
             send_whatsapp_message(sender_phone, "🤝 *التفاوض:*\nأرسل 1 للشراء، 2 للبيع" + FOOTER)
@@ -252,10 +267,6 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         stars_display = "⭐" * stars
         review_msg = f"🌟 <b>تقييم جديد من عملاء الواتساب</b> 🌟\n\n👤 <b>العميل:</b> {name}\n⭐️ <b>التقييم:</b> {stars_display}\n\n💬 <i>\"{comment}\"</i>\n\nــــــــــــــــــــــــــــــــــــــ\n🤖 <b>للتداول:</b> {CHANNEL_USERNAME}"
         notify_telegram_admin_text(review_msg, send_to_channel=True)
-
-        # --- الجديد: إرسال التقييم لجوالك في واتساب لتحويله للقناة ---
-        wa_review_msg = f"📣 *منشور جاهز للقناة (اضغط تحويل)*:\n\n🌟 *تقييم جديد من عملائنا* 🌟\n\n{stars_display}\n\n💬 \"{comment}\""
-        send_whatsapp_message(ADMIN_WA_NUMBER, wa_review_msg)
 
     elif state == 'buy_amount':
         try:
@@ -283,7 +294,8 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             conn.commit()
             conn.close()
             
-            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\nطلبك الآن قيد المراجعة. سيتم تحويل الـ USDT لك خلال لحظات...\n(الرجاء عدم إرسال رسائل أخرى حتى يكتمل طلبك).")
+            # الرد الاستباقي (Proactive Response)
+            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\n✅ جارٍ التحقق من الإشعار والبنك...\n✅ جارٍ تجهيز الأموال للتحويل...\n(سيصلك إشعار التنفيذ النهائي وإيصال التحويل قريباً، يرجى الانتظار)" + FOOTER)
             
             photo_bytes = get_whatsapp_media(image_id)
             admin_alert = f"🚨 *طلب شراء واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nيطلب: `{order['amount']}` USDT\nدفع: `{order['total_sdg']}` جنيه\nالمحفظة:\n`{order['wallet']}`"
@@ -291,7 +303,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             if photo_bytes:
                 notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
             else:
-                notify_telegram_admin_text(admin_alert + "\n\n⚠️ (تنبيه: فشل تحميل صورة الإشعار من سيرفر ميتا، يرجى مراجعتها في الواتساب)", False, order_id)
+                notify_telegram_admin_text(admin_alert + "\n\n⚠️ (فشل جلب الصورة، راجعها في واتساب)", False, order_id)
                 
             del user_states[sender_phone]
         else: send_whatsapp_message(sender_phone, "⚠️ أرسل *صورة* الإشعار فقط." + FOOTER)
@@ -327,7 +339,8 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             conn.commit()
             conn.close()
             
-            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\nطلبك الآن قيد المراجعة. سيتم تحويل الجنيهات لحسابك خلال لحظات...\n(الرجاء عدم إرسال رسائل أخرى حتى يكتمل طلبك).")
+            # الرد الاستباقي
+            send_whatsapp_message(sender_phone, "🕒 *تم الاستلام بنجاح!*\n\n✅ جارٍ التحقق من التحويل...\n✅ جارٍ تجهيز الجنيهات للإرسال إلى بنكك...\n(سيصلك إشعار التنفيذ وإيصال التحويل قريباً، يرجى الانتظار)" + FOOTER)
             
             photo_bytes = get_whatsapp_media(image_id)
             admin_alert = f"🚨 *طلب بيع واتساب!* `#{order_id}`\n\n📱 عميل: `+{sender_phone}`\n[💬 مراسلة واتساب](wa.me/{sender_phone})\nأرسل: `{order['amount']}` USDT\nيجب تحويل: *{order['total_sdg']}* جنيه\nلحساب:\n`{order['client_bank']}`"
@@ -335,7 +348,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             if photo_bytes:
                 notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
             else:
-                notify_telegram_admin_text(admin_alert + "\n\n⚠️ (تنبيه: فشل تحميل صورة الإشعار من سيرفر ميتا، يرجى مراجعتها في الواتساب)", False, order_id)
+                notify_telegram_admin_text(admin_alert + "\n\n⚠️ (فشل جلب الصورة، راجعها في واتساب)", False, order_id)
                 
             del user_states[sender_phone]
         else: send_whatsapp_message(sender_phone, "⚠️ أرسل *صورة* التحويل فقط." + FOOTER)
