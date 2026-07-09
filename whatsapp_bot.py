@@ -388,6 +388,13 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             notify_telegram_admin_text(f"🤝 *طلب تفاوض واتساب!*\n👤 العميل: `{name}`\n[💬 راسله واتساب](wa.me/{sender_phone})\nيرغب في: **{op_text}**\nالكمية: `{amount}`\nالسعر المعروض: `{price}`\n\n*(قم بمراسلته مباشرة على واتساب للاتفاق أو قبول العرض)*")
             del user_states[sender_phone]
         except: send_whatsapp_message(sender_phone, "⚠️ أرقام فقط." + FOOTER)
+        
+# ==========================================
+# الصفحة الرئيسية للسيرفر (إثبات التشغيل)
+# ==========================================
+@app.route('/', methods=['GET'])
+def index():
+    return "🚀 MZahir Exchange - WhatsApp Bot Server is Running Successfully!", 200
 
 # ==========================================
 # الخادم المستضيف (Webhook Server)
