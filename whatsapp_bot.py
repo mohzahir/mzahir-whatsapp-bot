@@ -3,6 +3,7 @@ import requests
 import psycopg2
 import os
 import json
+import re
 
 app = Flask(__name__)
 
@@ -19,14 +20,10 @@ DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaT
 ADMIN_WA_NUMBER = '249117017444'
 WA_CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDXBPq8V0toBVu2CE41"
 
-# تذييل ثابت لدعم الثقة والتواصل
 FOOTER = "\n\nــــــــــــــــــــــــــــــــــــــــ\n0️⃣ ❌ لإلغاء الطلب والعودة للقائمة\n🎧 للدعم الفني المباشر: أرسل كلمة (دعم)"
 
 user_states = {}
 
-# ==========================================
-# دوال المساعدة للبيانات
-# ==========================================
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
@@ -63,17 +60,6 @@ def has_pending_order(phone):
     conn.close()
     return bool(result)
 
-def get_user_stats(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM orders WHERE user_id = %s AND status = 'COMPLETED'", (int(user_id),))
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count
-
-# ==========================================
-# دوال إرسال واستقبال الميديا والرسائل
-# ==========================================
 def send_whatsapp_message(to_phone, text):
     url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
@@ -105,29 +91,21 @@ def notify_telegram_admin_with_photo(photo_bytes, caption, order_id):
 
 def notify_telegram_admin_action(text, order_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    reply_markup = {
-        "inline_keyboard": [[{"text": "💳 إرسال بيانات الدفع للعميل", "callback_data": f"provide_account_{order_id}"}]]
-    }
+    reply_markup = {"inline_keyboard": [[{"text": "💳 إرسال بيانات الدفع للعميل", "callback_data": f"provide_account_{order_id}"}]]}
     payload = {'chat_id': ADMIN_ID, 'text': text, 'parse_mode': 'Markdown', 'reply_markup': json.dumps(reply_markup)}
     requests.post(url, json=payload)
 
-# ==========================================
-# المنطق الأساسي للردود (WhatsApp Logic)
-# ==========================================
 def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     global user_states
     msg_text = str(msg_text).strip() if msg_text else ""
     
-    # 🚫 الفحص الأمني للحظر
     if is_user_banned(sender_phone):
         return send_whatsapp_message(sender_phone, "⛔️ عذراً، حسابك محظور من استخدام النظام بسبب مخالفة شروط الاستخدام.")
 
-    # 🎧 الدعم الفني المباشر
     if msg_text == "دعم" or msg_text == "مساعدة":
         send_whatsapp_message(sender_phone, "🎧 *الدعم الفني المباشر:*\nنحن متواجدون للرد على استفساراتك فوراً عبر الرابط:\nwa.me/249117017444\n\n(طلبك الحالي إن وجد لا يزال محفوظاً).")
         return
 
-    # 🔒 جدار الحماية للطلبات المعلقة (AWAITING_ACCOUNT, PENDING_RECEIPT, PENDING)
     if has_pending_order(sender_phone):
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -137,24 +115,19 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         
         if current_db_status:
             db_stat = current_db_status[0]
-            
-            # إذا كان العميل يرسل صورة وهو في وضع PENDING_RECEIPT
             if msg_type == 'image' and image_id and db_stat == 'PENDING_RECEIPT':
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("UPDATE orders SET status = 'PENDING' WHERE user_id = %s AND status = 'PENDING_RECEIPT' RETURNING order_id, amount, order_type, wallet_address", (int(sender_phone),))
                 updated_order = cursor.fetchone()
-                conn.commit()
-                conn.close()
+                conn.commit(); conn.close()
                 
                 if updated_order:
                     order_id, amount, o_type, w_addr = updated_order
                     send_whatsapp_message(sender_phone, "🕒 *تم استلام الإشعار المالي بنجاح!*\n\n✅ جارٍ التحقق من التحويل والبنك...\n✅ الإدارة تقوم الآن بتجهيز أموالك للإرسال...\n\n(سيصلك إشعار التنفيذ النهائي قريباً، يرجى الانتظار)" + FOOTER)
-                    
                     photo_bytes = get_whatsapp_media(image_id)
                     user_info = is_user_registered(sender_phone)
                     full_name = user_info[0] if user_info else "غير مسجل"
-                    
                     admin_alert = f"🚨 *تأكيد دفع (واتساب) لطلب #{order_id}!*\n\n👤 العميل: `{full_name}`\n🔗 [💬 مراسلة واتساب](wa.me/{sender_phone})\n\nالعميل قام برفع الإشعار المرفق لتأكيد تحويله مبلغ `{amount}`."
                     if photo_bytes: notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
                     return
@@ -162,12 +135,9 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             if msg_text == "0":
                 trust_msg = "🛡️ *إجراء أمني:*\nعذراً، لا يمكن إلغاء الطلب أثناء معالجته مالياً حفاظاً على حقوقك.\nلا تقلق، طلبك في أيادي أمينة وقيد المراجعة."
             else:
-                if db_stat == 'AWAITING_ACCOUNT':
-                    trust_msg = "🕒 *طلبك قيد التجهيز*\nنحن نقوم الآن بتجهيز الحساب البنكي الآمن لتقوم بالتحويل عليه، سيصلك خلال ثوانٍ..."
-                elif db_stat == 'PENDING_RECEIPT':
-                    trust_msg = "🕒 *نحن في انتظار إشعارك*\nالرجاء إرفاق صورة إشعار التحويل البنكي هنا لكي نقوم بإرسال أموالك فوراً."
-                else:
-                    trust_msg = "🕒 *طلبك قيد التنفيذ والمراجعة*\nنحن نقوم بمطابقة الإشعار المالي الآن. التنفيذ آلي وسريع."
+                if db_stat == 'AWAITING_ACCOUNT': trust_msg = "🕒 *طلبك قيد التجهيز*\nنحن نقوم الآن بتجهيز الحساب البنكي الآمن لتقوم بالتحويل عليه، سيصلك خلال ثوانٍ..."
+                elif db_stat == 'PENDING_RECEIPT': trust_msg = "🕒 *نحن في انتظار إشعارك*\nالرجاء إرفاق صورة إشعار التحويل البنكي هنا لكي نقوم بإرسال أموالك فوراً."
+                else: trust_msg = "🕒 *طلبك قيد التنفيذ والمراجعة*\nنحن نقوم بمطابقة الإشعار المالي الآن. التنفيذ آلي وسريع."
             send_whatsapp_message(sender_phone, trust_msg + FOOTER)
             return
 
@@ -179,48 +149,59 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     state = user_states.get(sender_phone, {}).get('step')
     settings = get_bot_settings()
 
-    # ⏱️ الحماية: فحص الانشغال
     if not state and msg_text in ["1", "2", "3", "4"] and settings['is_busy']:
         return send_whatsapp_message(sender_phone, "⏱️ عذراً، الإدارة في وضع الانشغال أو خارج أوقات العمل حالياً. يرجى المحاولة لاحقاً." + FOOTER)
 
     if not state:
-        star_count = msg_text.count('⭐') + msg_text.count('⭐️') + msg_text.count('🌟')
-        if star_count > 0:
-            stars = min(5, star_count)
-            user_states[sender_phone] = {'step': 'write_review', 'stars': stars}
-            send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
-            return
+        # نظام التقاط التقييم السهل جداً
+        if msg_text.startswith("تقييم"):
+            try:
+                numbers = re.findall(r'\d+', msg_text)
+                if numbers:
+                    stars = int(numbers[0])
+                    if 1 <= stars <= 5:
+                        user_states[sender_phone] = {'step': 'write_review', 'stars': stars}
+                        send_whatsapp_message(sender_phone, "✍️ شكراً لتقييمك! يرجى كتابة تعليق قصير عن خدمتنا لتشجيع الآخرين:" + FOOTER)
+                        return
+            except: pass
 
         if msg_text == "1":
             if not is_user_registered(sender_phone):
                 user_states[sender_phone] = {'step': 'auth_name', 'next_action': 'sell_sar'}
                 return send_whatsapp_message(sender_phone, "🛡️ مرحباً بك في منصة التحويل الآمن.\n\n👤 لضمان حقوقك، يرجى كتابة *اسمك الكامل* (الذي يظهر في حسابك البنكي):" + FOOTER)
             user_states[sender_phone] = {'step': 'sell_sar_amount'}
-            send_whatsapp_message(sender_phone, f"🇸🇦 *تحويل من السعودية (ريال)*\n\nنستلم منك الريال السعودي، ونسلم أهلك بالجنيه السوداني (بنكك).\n\n💡 *للمبالغ الكبيرة:* يمكنك تقسيم التحويل والبدء بمبلغ صغير للتجربة والشعور بالأمان.\n\nالرجاء كتابة كمية الريال التي تريد تحويلها (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🇸🇦 *تحويل من السعودية (استلام بنكك)*\n\nنستلم منك الريال السعودي، ونسلم أهلك بالجنيه السوداني فوراً.\n\n💡 *للمبالغ الكبيرة:* يمكنك تقسيم التحويل والبدء بمبلغ صغير للتجربة والشعور بالأمان.\n\nالرجاء كتابة كمية الريال التي تريد تحويلها (رقم فقط):" + FOOTER)
             
         elif msg_text == "2":
             if not is_user_registered(sender_phone):
                 user_states[sender_phone] = {'step': 'auth_name', 'next_action': 'sell_aed'}
                 return send_whatsapp_message(sender_phone, "🛡️ مرحباً بك في منصة التحويل الآمن.\n\n👤 لضمان حقوقك، يرجى كتابة *اسمك الكامل* (الذي يظهر في حسابك البنكي):" + FOOTER)
             user_states[sender_phone] = {'step': 'sell_aed_amount'}
-            send_whatsapp_message(sender_phone, f"🇦🇪 *تحويل من الإمارات (درهم)*\n\nنستلم منك الدرهم الإماراتي، ونسلم أهلك بالجنيه السوداني (بنكك).\n\n💡 *للمبالغ الكبيرة:* ابدأ بمبلغ صغير للتجربة أولاً.\n\nالرجاء كتابة كمية الدرهم التي تريد تحويلها (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🇦🇪 *تحويل من الإمارات (استلام بنكك)*\n\nنستلم منك الدرهم الإماراتي، ونسلم أهلك بالجنيه السوداني فوراً.\n\n💡 *للمبالغ الكبيرة:* ابدأ بمبلغ صغير للتجربة أولاً.\n\nالرجاء كتابة كمية الدرهم التي تريد تحويلها (رقم فقط):" + FOOTER)
             
         elif msg_text == "3":
             if not is_user_registered(sender_phone):
                 user_states[sender_phone] = {'step': 'auth_name', 'next_action': 'sell_egp'}
                 return send_whatsapp_message(sender_phone, "🛡️ مرحباً بك في منصة التحويل الآمن.\n\n👤 لضمان حقوقك، يرجى كتابة *اسمك الكامل* (الذي يظهر في حسابك البنكي):" + FOOTER)
             user_states[sender_phone] = {'step': 'sell_egp_amount'}
-            send_whatsapp_message(sender_phone, f"🇪🇬 *تحويل من مصر (جنيه مصري)*\n\nنستلم منك الجنيه المصري، ونسلم أهلك بالجنيه السوداني (بنكك).\n\nالرجاء كتابة كمية الجنيه المصري التي تريد تحويلها (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🇪🇬 *تحويل من مصر (استلام بنكك)*\n\nنستلم منك الجنيه المصري، ونسلمك بالجنيه السوداني.\n\nالرجاء كتابة كمية الجنيه المصري التي تريد تحويلها (رقم فقط):" + FOOTER)
             
         elif msg_text == "4":
             if not is_user_registered(sender_phone):
                 user_states[sender_phone] = {'step': 'auth_name', 'next_action': 'buy_egp'}
                 return send_whatsapp_message(sender_phone, "🛡️ مرحباً بك في منصة التحويل الآمن.\n\n👤 لضمان حقوقك، يرجى كتابة *اسمك الكامل* (الذي يظهر في حسابك البنكي):" + FOOTER)
             user_states[sender_phone] = {'step': 'buy_egp_amount'}
-            send_whatsapp_message(sender_phone, f"🔄 *شحن حساب مصري*\n\nنستلم منك الجنيه السوداني (بنكك)، ونشحن لك حساب في مصر (إنستاباي/فودافون كاش).\n\nالرجاء كتابة كمية *الجنيه المصري* التي تريد شحنها (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🔄 *شحن حساب مصري (إنستاباي/فودافون كاش)*\n\nنستلم منك الجنيه السوداني، ونشحن لك حسابك في مصر.\n\nالرجاء كتابة كمية *الجنيه المصري* التي تريد شحنها (رقم فقط):" + FOOTER)
             
         elif msg_text == "5":
-            send_whatsapp_message(sender_phone, f"📊 *أسعار الحوالات اليوم:*\n\n🇸🇦 *الريال السعودي:* {settings['sar_price']} جنيه\n🇦🇪 *الدرهم الإماراتي:* {settings['aed_price']} جنيه\n🇪🇬 *الجنيه المصري (نستلم منك):* {settings['egp_sell_price']} جنيه\n🇪🇬 *الجنيه المصري (نشحن لك):* {settings['egp_buy_price']} جنيه" + FOOTER)
+            prices_msg = (
+                f"📊 *أسعار التحويل وصرف العملات اليوم:*\n\n"
+                f"🇸🇦 *الريال السعودي (استلام في بنكك):* {settings['sar_price']} جنيه\n"
+                f"🇦🇪 *الدرهم الإماراتي (استلام في بنكك):* {settings['aed_price']} جنيه\n"
+                f"🇪🇬 *الجنيه المصري (تحويل من مصر لسودان - استلام بنكك):* {settings['egp_sell_price']} جنيه\n"
+                f"🔄 *الجنيه المصري (تحويل من سودان لمصر - شحن إنستاباي):* {settings['egp_buy_price']} جنيه\n"
+            )
+            send_whatsapp_message(sender_phone, prices_msg + FOOTER)
         elif msg_text == "6":
             send_whatsapp_message(sender_phone, "🎧 *قسم الدعم الفني*\nلأي استفسار مالي أو لمتابعة حوالتك الكبيرة، نحن هنا لخدمتك:\nwa.me/249117017444" + FOOTER)
         else:
@@ -229,11 +210,11 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                 f"مرحباً بك في منصة الحوالات السريعة والآمنة 🚀\n"
                 f"📡 حالة النظام: {status}\n\n"
                 f"يرجى إرسال الرقم المطلوب لاختيار الخدمة:\n\n"
-                f"1️⃣ 🇸🇦 تحويل من السعودية (بيع ريال)\n"
-                f"2️⃣ 🇦🇪 تحويل من الإمارات (بيع درهم)\n"
-                f"3️⃣ 🇪🇬 تحويل من مصر (بيع جنيه مصري)\n"
-                f"4️⃣ 🔄 شحن حساب مصري (شراء مصري)\n"
-                f"5️⃣ 📊 أسعار الصرف اليوم\n"
+                f"1️⃣ 🇸🇦 تحويل من السعودية (تستلم بنكك)\n"
+                f"2️⃣ 🇦🇪 تحويل من الإمارات (تستلم بنكك)\n"
+                f"3️⃣ 🇪🇬 تحويل من مصر (تستلم بنكك)\n"
+                f"4️⃣ 🔄 شحن حساب مصري (إنستاباي/محافظ)\n"
+                f"5️⃣ 📊 أسعار الصرف للحوالات اليوم\n"
                 f"6️⃣ 🎧 التحدث مع الدعم الفني\n" + FOOTER
             )
             send_whatsapp_message(sender_phone, welcome)
@@ -253,13 +234,13 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         nxt = user_states[sender_phone].get('next_action')
         if nxt == 'sell_sar':
             user_states[sender_phone] = {'step': 'sell_sar_amount'}
-            send_whatsapp_message(sender_phone, f"🇸🇦 *الريال السعودي*\nاكتب كمية الريال التي تريد تحويلها للسودان (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🇸🇦 *تحويل من السعودية*\nاكتب كمية الريال التي تريد تحويلها للسودان (رقم فقط):" + FOOTER)
         elif nxt == 'sell_aed':
             user_states[sender_phone] = {'step': 'sell_aed_amount'}
-            send_whatsapp_message(sender_phone, f"🇦🇪 *الدرهم الإماراتي*\nاكتب كمية الدرهم التي تريد تحويلها للسودان (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🇦🇪 *تحويل من الإمارات*\nاكتب كمية الدرهم التي تريد تحويلها للسودان (رقم فقط):" + FOOTER)
         elif nxt == 'sell_egp':
             user_states[sender_phone] = {'step': 'sell_egp_amount'}
-            send_whatsapp_message(sender_phone, f"🇪🇬 *الجنيه المصري*\nاكتب كمية الجنيه المصري التي تريد تحويلها (رقم فقط):" + FOOTER)
+            send_whatsapp_message(sender_phone, f"🇪🇬 *تحويل من مصر*\nاكتب كمية الجنيه المصري التي تريد تحويلها (رقم فقط):" + FOOTER)
         elif nxt == 'buy_egp':
             user_states[sender_phone] = {'step': 'buy_egp_amount'}
             send_whatsapp_message(sender_phone, f"🔄 *شحن حساب مصري*\nاكتب كمية الجنيه المصري التي تريد شحنها لحسابك (رقم فقط):" + FOOTER)
@@ -301,7 +282,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         order_id = cursor.fetchone()[0]
         conn.commit(); conn.close()
         
-        send_whatsapp_message(sender_phone, "🕒 *جارٍ تجهيز التحويل...*\n\nالرجاء الانتظار قليلاً، نحن نقوم الآن بإنشاء وتجهيز الحساب البنكي الموثوق لتقوم بالتحويل إليه لضمان أمان أموالك..." + FOOTER)
+        send_whatsapp_message(sender_phone, "🕒 *جارٍ تجهيز التحويل...*\n\nالرجاء الانتظار قليلاً، نحن نقوم الآن بتجهيز الحساب البنكي الموثوق لتقوم بالتحويل إليه لضمان أمان أموالك..." + FOOTER)
         
         admin_alert = f"🚨 *حوالة جديدة من واتساب!* `#{order_id}`\n\nالعميل يريد إرسال `{order['amount']}` {order['c_type']}\nيجب تسليمه: `{order['total_sdg']}` جنيه سوداني.\n\nاضغط الزر أدناه لتزويده برقم الحساب (STC Pay/Bank) ليقوم بالتحويل عليه:"
         notify_telegram_admin_action(admin_alert, order_id)
