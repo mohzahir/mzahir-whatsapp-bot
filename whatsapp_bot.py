@@ -306,39 +306,14 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         user_info = is_user_registered(sender_phone)
         client_bank = user_info[1] if msg_text == "1" else msg_text
         order = user_states[sender_phone]
-        # حالة جديدة: AWAITING_CONFIRMATION
+        
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) 
-                          VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', 
-                       (int(sender_phone), f"SELL_{order['c_type']}", order['amount'], order['total_sdg'], f"بنكك: {client_bank}", 'AWAITING_CONFIRMATION', 'whatsapp'))
+        cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', (int(sender_phone), f"SELL_{order['c_type']}", order['amount'], order['total_sdg'], f"بنكك: {client_bank}", 'AWAITING_ACCOUNT', 'whatsapp'))
         order_id = cursor.fetchone()[0]
         conn.commit(); conn.close()
         
-        # الرسالة للعميل للتأكيد
-        send_whatsapp_message(sender_phone, 
-            "✅ *تمت مراجعة تفاصيل الحوالة.*\n\n"
-            "الرجاء الضغط على كلمة *تأكيد* بالأسفل لنقوم فوراً بتجهيز الحساب البنكي لك لبدء التحويل (العملية صالحة لـ 15 دقيقة فقط)." + FOOTER)
-        
-        # نحدث الـ step لانتظار كلمة "تأكيد"
-        user_states[sender_phone] = {'step': 'confirm_order', 'order_id': order_id}
-        
-    elif state == 'confirm_order':
-        if msg_text.lower() == "تأكيد":
-            order_id = user_states[sender_phone]['order_id']
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE orders SET status = 'AWAITING_ACCOUNT' WHERE order_id = %s", (order_id,))
-            conn.commit(); conn.close()
-            
-            send_whatsapp_message(sender_phone, "🕒 *جاري تجهيز بيانات الحساب...*\n\nالرجاء الانتظار، سيصلك رقم الحساب البنكي الموثوق فوراً لتبدأ التحويل." + FOOTER)
-            
-            # الآن نرسل إشعار للإدارة
-            admin_alert = f"🚨 *طلب حساب لحوالة واتساب!* `#{order_id}`\nالعميل أكد جدية الطلب.\nاضغط الزر لتزويده بالحساب:"
-            notify_telegram_admin_action(admin_alert, order_id)
-            del user_states[sender_phone]
-        else:
-            send_whatsapp_message(sender_phone, "⚠️ يرجى إرسال كلمة *تأكيد* للمتابعة، أو 0 للإلغاء." + FOOTER)
+        send_whatsapp_message(sender_phone, "🕒 *جارٍ تجهيز التحويل...*\n\nالرجاء الانتظار قليلاً، نحن نقوم الآن بتجهيز الحساب البنكي الموثوق لتقوم بالتحويل إليه لضمان أمان أموالك..." + FOOTER)
         
         user_info = is_user_registered(sender_phone)
         full_name = user_info[0] if user_info else "غير مسجل"
