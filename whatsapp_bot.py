@@ -19,7 +19,6 @@ CHANNEL_USERNAME = "@MZahir_P2P"
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_yaTgVL9m4NlA@ep-nameless-butterfly-ada3hsu3-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 ADMIN_WA_NUMBER = '249117017444'
 
-# روابط العلامة التجارية "واصِل دايركت"
 WA_CHANNEL_LINK = "https://whatsapp.com/channel/0029VbDXBPq8V0toBVu2CE41"
 BOT_WA_LINK = "https://wa.me/249909590325"
 
@@ -109,18 +108,18 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         send_whatsapp_message(sender_phone, f"🎧 *الدعم الفني المباشر:*\nفريقنا متواجد للرد على استفساراتك فوراً عبر الرابط التالي:\nhttps://wa.me/249117017444\n\n(طلبك الحالي إن وجد لا يزال محفوظاً بأمان).")
         return
 
+    # 🔒 جدار الحماية والفحص الذكي للطلبات المعلقة في قاعدة البيانات
     if has_pending_order(sender_phone):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT status FROM orders WHERE user_id = %s AND status IN ('PENDING', 'AWAITING_ACCOUNT', 'PENDING_RECEIPT')", (int(sender_phone),))
         current_db_status = cursor.fetchone()
-        conn.close()
         
         if current_db_status:
             db_stat = current_db_status[0]
+            
+            # حالة 1: العميل يرفق الإشعار
             if msg_type == 'image' and image_id and db_stat == 'PENDING_RECEIPT':
-                conn = get_db_connection()
-                cursor = conn.cursor()
                 cursor.execute("UPDATE orders SET status = 'PENDING' WHERE user_id = %s AND status = 'PENDING_RECEIPT' RETURNING order_id, amount, order_type, wallet_address", (int(sender_phone),))
                 updated_order = cursor.fetchone()
                 conn.commit(); conn.close()
@@ -135,14 +134,30 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                     if photo_bytes: notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
                     return
 
+            # حالة 2: العميل يطلب إلغاء الطلب (رقم 0)
             if msg_text == "0":
-                trust_msg = "🛡️ *إجراء أمني:*\nعذراً، لا يمكن إلغاء الطلب أثناء معالجته مالياً حفاظاً على أمان أموالك.\nلا تقلق، طلبك في أيادي أمينة وقيد التنفيذ."
-            else:
-                if db_stat == 'AWAITING_ACCOUNT': trust_msg = "🕒 *طلبك قيد التجهيز*\nنحن نقوم الآن بتجهيز الحساب البنكي الآمن لتقوم بالتحويل عليه، سيصلك الحساب خلال ثوانٍ..."
-                elif db_stat == 'PENDING_RECEIPT': trust_msg = "🕒 *نحن في انتظار إشعارك*\nالرجاء إرفاق صورة إشعار التحويل البنكي هنا لكي نقوم بإرسال أموالك فوراً."
-                else: trust_msg = "🕒 *طلبك قيد التنفيذ والمراجعة*\nنحن نقوم بمطابقة الإشعار المالي الآن. التنفيذ آلي وسريع."
+                if db_stat in ['AWAITING_ACCOUNT', 'PENDING_RECEIPT']:
+                    # مسموح بالإلغاء لأن الأموال لم تصلنا بعد
+                    cursor.execute("DELETE FROM orders WHERE user_id = %s AND status = %s", (int(sender_phone), db_stat))
+                    conn.commit()
+                    if sender_phone in user_states: del user_states[sender_phone]
+                    send_whatsapp_message(sender_phone, "🚫 تم إلغاء الطلب بأمان.\nأرسل (مرحبا) للبدء من جديد أو لعرض القائمة." + FOOTER)
+                else:
+                    # غير مسموح لأن الإشعار رُفع والحالة PENDING
+                    trust_msg = "🛡️ *إجراء أمني:*\nعذراً، لا يمكن إلغاء الطلب بعد رفع الإشعار المالي حفاظاً على أمان أموالك.\nلا تقلق، طلبك في أيادي أمينة وقيد المراجعة للتنفيذ."
+                    send_whatsapp_message(sender_phone, trust_msg + FOOTER)
+                conn.close()
+                return
+
+            # حالة 3: العميل يرسل نصوص عشوائية أثناء الانتظار
+            conn.close()
+            if db_stat == 'AWAITING_ACCOUNT': trust_msg = "🕒 *طلبك قيد التجهيز*\nنحن نقوم الآن بتجهيز الحساب البنكي الآمن لتقوم بالتحويل عليه، سيصلك الحساب خلال ثوانٍ..."
+            elif db_stat == 'PENDING_RECEIPT': trust_msg = "🕒 *نحن في انتظار إشعارك*\nالرجاء إرفاق صورة إشعار التحويل البنكي هنا لكي نقوم بإرسال أموالك فوراً."
+            else: trust_msg = "🕒 *طلبك قيد التنفيذ والمراجعة*\nنحن نقوم بمطابقة الإشعار المالي الآن. التنفيذ آلي وسريع."
             send_whatsapp_message(sender_phone, trust_msg + FOOTER)
             return
+            
+        conn.close()
 
     if msg_text == "0":
         if sender_phone in user_states: del user_states[sender_phone]
@@ -201,7 +216,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                 f"🇸🇦 *الريال السعودي (تستلم في بنكك):* {settings['sar_price']} جنيه\n"
                 f"🇦🇪 *الدرهم الإماراتي (تستلم في بنكك):* {settings['aed_price']} جنيه\n"
                 f"🇪🇬 *الجنيه المصري (تحويل من مصر لسودان - استلام بنكك):* {settings['egp_sell_price']} جنيه\n"
-                f"🔄 *الجنيه المصري (تحويل من سودان لمصر - شحن إنستاباي):* {settings['egp_buy_price']} جنيه\n"
+                f"🔄 *شحن حساب مصري (نشحن لك إنستاباي):* {settings['egp_buy_price']} جنيه\n"
             )
             send_whatsapp_message(sender_phone, prices_msg + FOOTER)
         elif msg_text == "6":
