@@ -106,7 +106,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         return send_whatsapp_message(sender_phone, "⛔️ عذراً، حسابك محظور من استخدام النظام بسبب مخالفة شروط الاستخدام.")
 
     if msg_text == "دعم" or msg_text == "مساعدة":
-        send_whatsapp_message(sender_phone, "🎧 *الدعم الفني المباشر:*\nفريقنا متواجد للرد على استفساراتك فوراً عبر الرابط التالي:\nwa.me/249117017444\n\n(طلبك الحالي إن وجد لا يزال محفوظاً بأمان).")
+        send_whatsapp_message(sender_phone, f"🎧 *الدعم الفني المباشر:*\nفريقنا متواجد للرد على استفساراتك فوراً عبر الرابط التالي:\nhttps://wa.me/249117017444\n\n(طلبك الحالي إن وجد لا يزال محفوظاً بأمان).")
         return
 
     if has_pending_order(sender_phone):
@@ -131,7 +131,7 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                     photo_bytes = get_whatsapp_media(image_id)
                     user_info = is_user_registered(sender_phone)
                     full_name = user_info[0] if user_info else "غير مسجل"
-                    admin_alert = f"🚨 *تأكيد دفع (واتساب) لطلب #{order_id}!*\n\n👤 العميل: `{full_name}`\n🔗 [💬 مراسلة واتساب](wa.me/{sender_phone})\n\nالعميل قام برفع الإشعار المرفق لتأكيد تحويله مبلغ `{amount}`."
+                    admin_alert = f"🚨 *تأكيد دفع (واتساب) لطلب #{order_id}!*\n\n👤 العميل: `{full_name}`\n🔗 [💬 تواصل مع العميل مباشرة](https://wa.me/{sender_phone})\n\nالعميل قام برفع الإشعار المرفق لتأكيد تحويله مبلغ `{amount}`."
                     if photo_bytes: notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
                     return
 
@@ -200,12 +200,12 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                 f"📊 *أسعار الحوالات اليوم:*\n\n"
                 f"🇸🇦 *الريال السعودي (تستلم في بنكك):* {settings['sar_price']} جنيه\n"
                 f"🇦🇪 *الدرهم الإماراتي (تستلم في بنكك):* {settings['aed_price']} جنيه\n"
-                f"🇪🇬 *الجنيه المصري (تستلم في بنكك):* {settings['egp_sell_price']} جنيه\n"
-                f"🔄 *شحن حساب مصري (نشحن لك إنستاباي):* {settings['egp_buy_price']} جنيه\n"
+                f"🇪🇬 *الجنيه المصري (تحويل من مصر لسودان - استلام بنكك):* {settings['egp_sell_price']} جنيه\n"
+                f"🔄 *الجنيه المصري (تحويل من سودان لمصر - شحن إنستاباي):* {settings['egp_buy_price']} جنيه\n"
             )
             send_whatsapp_message(sender_phone, prices_msg + FOOTER)
         elif msg_text == "6":
-            send_whatsapp_message(sender_phone, "🎧 *قسم الدعم الفني*\nلأي استفسار مالي أو لمتابعة حوالتك الكبيرة، نحن هنا لخدمتك:\nwa.me/249117017444" + FOOTER)
+            send_whatsapp_message(sender_phone, "🎧 *قسم الدعم الفني*\nلأي استفسار مالي أو لمتابعة حوالتك الكبيرة، نحن هنا لخدمتك:\nhttps://wa.me/249117017444" + FOOTER)
         elif msg_text == "7":
             trust_msg = (
                 f"🛡️ *لماذا تثق في واصل دايركت؟*\n\n"
@@ -300,7 +300,10 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         
         send_whatsapp_message(sender_phone, "🕒 *جارٍ تجهيز التحويل...*\n\nالرجاء الانتظار قليلاً، نحن نقوم الآن بتجهيز الحساب البنكي الموثوق لتقوم بالتحويل إليه لضمان أمان أموالك..." + FOOTER)
         
-        admin_alert = f"🚨 *حوالة جديدة من واتساب!* `#{order_id}`\n\nالعميل يريد إرسال `{order['amount']}` {order['c_type']}\nيجب تسليمه: `{order['total_sdg']}` جنيه سوداني.\n\nاضغط الزر أدناه لتزويده برقم الحساب (STC Pay/Bank/Instapay) ليقوم بالتحويل عليه:"
+        user_info = is_user_registered(sender_phone)
+        full_name = user_info[0] if user_info else "غير مسجل"
+        
+        admin_alert = f"🚨 *حوالة جديدة من واتساب!* `#{order_id}`\n\n👤 العميل: `{full_name}`\n📱 الهاتف: `+{sender_phone}`\n🔗 [💬 تواصل مع العميل مباشرة](https://wa.me/{sender_phone})\n\nالعميل يريد إرسال `{order['amount']}` {order['c_type']}\nيجب تسليمه: `{order['total_sdg']}` جنيه سوداني.\n\nاضغط الزر أدناه لتزويده برقم الحساب (STC Pay/Bank/Instapay) ليقوم بالتحويل عليه:"
         notify_telegram_admin_action(admin_alert, order_id)
         del user_states[sender_phone]
 
@@ -318,13 +321,17 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         order = user_states[sender_phone]
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', (int(sender_phone), 'BUY_EGP', order['amount'], order['total_sdg'], f"مصري: {client_egp_account}", 'PENDING_RECEIPT', 'whatsapp'))
+        cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', (int(sender_phone), 'BUY_EGP', order['amount'], order['total_sdg'], f"مصري: {client_egp_account}", 'AWAITING_ACCOUNT', 'whatsapp'))
         order_id = cursor.fetchone()[0]
         conn.commit(); conn.close()
         
-        text = (f"🛡️ *خطوة أخيرة*\n\n🔹 حساب الاستلام في مصر: `{client_egp_account}`\n🔹 المبلغ المطلوب منك: *{order['total_sdg']} جنيه سوداني*\n\n"
-                f"🏦 *حسابنا (بنكك):*\n• الحساب: `3290549`\n• الاسم: محمد زاهر عبدالله علي\n• التعليق: حوالة الكترونية\n\n📸 *قم بتحويل المبلغ وأرسل صورة الإشعار هنا.*" + FOOTER)
-        send_whatsapp_message(sender_phone, text)
+        user_info = is_user_registered(sender_phone)
+        full_name = user_info[0] if user_info else "غير مسجل"
+        
+        send_whatsapp_message(sender_phone, "🕒 *جارٍ تجهيز التحويل...*\n\nالرجاء الانتظار قليلاً، نحن نقوم الآن بتجهيز حساب (بنكك) لتقوم بالتحويل إليه لضمان أمان أموالك..." + FOOTER)
+        
+        admin_alert = f"🚨 *طلب حساب لشحن مصري (واتساب)!* `#{order_id}`\n\n👤 العميل: `{full_name}`\n📱 الهاتف: `+{sender_phone}`\n🔗 [💬 تواصل مع العميل مباشرة](https://wa.me/{sender_phone})\n\nالعميل يريد شحن `{order['amount']}` مصري لحساب `{client_egp_account}`\nسيدفع: `{order['total_sdg']}` جنيه سوداني.\n\nاضغط الزر أدناه لتزويده برقم حساب (بنكك) ليقوم بالتحويل عليه:"
+        notify_telegram_admin_action(admin_alert, order_id)
         del user_states[sender_phone]
 
 @app.route('/webhook', methods=['GET', 'POST'])
