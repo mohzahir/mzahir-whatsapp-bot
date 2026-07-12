@@ -57,7 +57,7 @@ def is_user_banned(phone):
 def has_pending_order(phone):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM orders WHERE user_id = %s AND status IN ('PENDING', 'AWAITING_ACCOUNT', 'PENDING_RECEIPT')", (int(phone),))
+    cursor.execute("SELECT 1 FROM orders WHERE user_id = %s AND status IN ('PENDING', 'AWAITING_ACCOUNT', 'PENDING_RECEIPT', 'LOCKED_FOR_PROCESSING')", (int(phone),))
     result = cursor.fetchone()
     conn.close()
     return bool(result)
@@ -97,6 +97,11 @@ def notify_telegram_admin_action(text, order_id):
     payload = {'chat_id': ADMIN_ID, 'text': text, 'parse_mode': 'Markdown', 'reply_markup': json.dumps(reply_markup)}
     requests.post(url, json=payload)
 
+def notify_telegram_admin_text(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {'chat_id': ADMIN_ID, 'text': text, 'parse_mode': 'Markdown'}
+    requests.post(url, json=payload)
+
 def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     global user_states
     msg_text = str(msg_text).strip() if msg_text else ""
@@ -108,24 +113,22 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         send_whatsapp_message(sender_phone, f"🎧 *الدعم الفني المباشر:*\nفريقنا متواجد للرد على استفساراتك فوراً عبر الرابط التالي:\nhttps://wa.me/249117017444\n\n(طلبك الحالي إن وجد لا يزال محفوظاً بأمان).")
         return
 
-    # 🔒 جدار الحماية والفحص الذكي للطلبات المعلقة في قاعدة البيانات
     if has_pending_order(sender_phone):
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT status FROM orders WHERE user_id = %s AND status IN ('PENDING', 'AWAITING_ACCOUNT', 'PENDING_RECEIPT')", (int(sender_phone),))
+        cursor.execute("SELECT order_id, status FROM orders WHERE user_id = %s AND status IN ('PENDING', 'AWAITING_ACCOUNT', 'PENDING_RECEIPT', 'LOCKED_FOR_PROCESSING')", (int(sender_phone),))
         current_db_status = cursor.fetchone()
         
         if current_db_status:
-            db_stat = current_db_status[0]
+            order_id, db_stat = current_db_status
             
-            # حالة 1: العميل يرفق الإشعار
             if msg_type == 'image' and image_id and db_stat == 'PENDING_RECEIPT':
-                cursor.execute("UPDATE orders SET status = 'PENDING' WHERE user_id = %s AND status = 'PENDING_RECEIPT' RETURNING order_id, amount, order_type, wallet_address", (int(sender_phone),))
+                cursor.execute("UPDATE orders SET status = 'PENDING' WHERE order_id = %s RETURNING amount, order_type, wallet_address", (order_id,))
                 updated_order = cursor.fetchone()
                 conn.commit(); conn.close()
                 
                 if updated_order:
-                    order_id, amount, o_type, w_addr = updated_order
+                    amount, o_type, w_addr = updated_order
                     send_whatsapp_message(sender_phone, "🕒 *تم استلام إشعارك المالي بنجاح!*\n\n✅ جارٍ التحقق من التحويل البنكي...\n✅ الإدارة تقوم الآن بتجهيز أموالك للإرسال...\n\n(سيصلك إشعار التنفيذ النهائي قريباً، يرجى الانتظار)" + FOOTER)
                     photo_bytes = get_whatsapp_media(image_id)
                     user_info = is_user_registered(sender_phone)
@@ -134,24 +137,26 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
                     if photo_bytes: notify_telegram_admin_with_photo(photo_bytes, admin_alert, order_id)
                     return
 
-            # حالة 2: العميل يطلب إلغاء الطلب (رقم 0)
             if msg_text == "0":
                 if db_stat in ['AWAITING_ACCOUNT', 'PENDING_RECEIPT']:
-                    # مسموح بالإلغاء لأن الأموال لم تصلنا بعد
-                    cursor.execute("DELETE FROM orders WHERE user_id = %s AND status = %s", (int(sender_phone), db_stat))
+                    cursor.execute("DELETE FROM orders WHERE order_id = %s", (order_id,))
                     conn.commit()
+                    conn.close()
+                    notify_telegram_admin_text(f"⚠️ *إلغاء عميل واتساب استباقي:* العميل `+{sender_phone}` ألغى الطلب `#{order_id}`. الرجاء عدم فتح أي صفقات متعلقة بهذا الطلب.")
                     if sender_phone in user_states: del user_states[sender_phone]
                     send_whatsapp_message(sender_phone, "🚫 تم إلغاء الطلب بأمان.\nأرسل (مرحبا) للبدء من جديد أو لعرض القائمة." + FOOTER)
+                elif db_stat == 'LOCKED_FOR_PROCESSING':
+                    conn.close()
+                    send_whatsapp_message(sender_phone, "🛡️ *إجراء أمني:*\nالإدارة بدأت فعلياً في تأمين السيولة وفتح الاعتمادات البنكية لطلبك. لا يمكن الإلغاء في هذه المرحلة المستعجلة." + FOOTER)
                 else:
-                    # غير مسموح لأن الإشعار رُفع والحالة PENDING
-                    trust_msg = "🛡️ *إجراء أمني:*\nعذراً، لا يمكن إلغاء الطلب بعد رفع الإشعار المالي حفاظاً على أمان أموالك.\nلا تقلق، طلبك في أيادي أمينة وقيد المراجعة للتنفيذ."
+                    conn.close()
+                    trust_msg = "🛡️ *إجراء أمني:*\nعذراً، لا يمكن إلغاء الطلب بعد رفع الإشعار المالي حفاظاً على أمان أموالك.\nلا تقلق، طلبك في أيادي أمينة وقيد التنفيذ."
                     send_whatsapp_message(sender_phone, trust_msg + FOOTER)
-                conn.close()
                 return
 
-            # حالة 3: العميل يرسل نصوص عشوائية أثناء الانتظار
             conn.close()
             if db_stat == 'AWAITING_ACCOUNT': trust_msg = "🕒 *طلبك قيد التجهيز*\nنحن نقوم الآن بتجهيز الحساب البنكي الآمن لتقوم بالتحويل عليه، سيصلك الحساب خلال ثوانٍ..."
+            elif db_stat == 'LOCKED_FOR_PROCESSING': trust_msg = "🛡️ *الطلب قيد التنفيذ المالي*\nالإدارة بدأت فعلياً في تأمين السيولة. يرجى الانتظار لاستلام بيانات الدفع لحظياً."
             elif db_stat == 'PENDING_RECEIPT': trust_msg = "🕒 *نحن في انتظار إشعارك*\nالرجاء إرفاق صورة إشعار التحويل البنكي هنا لكي نقوم بإرسال أموالك فوراً."
             else: trust_msg = "🕒 *طلبك قيد التنفيذ والمراجعة*\nنحن نقوم بمطابقة الإشعار المالي الآن. التنفيذ آلي وسريع."
             send_whatsapp_message(sender_phone, trust_msg + FOOTER)
@@ -319,7 +324,10 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         full_name = user_info[0] if user_info else "غير مسجل"
         
         admin_alert = f"🚨 *حوالة جديدة من واتساب!* `#{order_id}`\n\n👤 العميل: `{full_name}`\n📱 الهاتف: `+{sender_phone}`\n🔗 [💬 تواصل مع العميل مباشرة](https://wa.me/{sender_phone})\n\nالعميل يريد إرسال `{order['amount']}` {order['c_type']}\nيجب تسليمه: `{order['total_sdg']}` جنيه سوداني.\n\nاضغط الزر أدناه لتزويده برقم الحساب (STC Pay/Bank/Instapay) ليقوم بالتحويل عليه:"
-        notify_telegram_admin_action(admin_alert, order_id)
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        reply_markup = {"inline_keyboard": [[{"text": "🔒 قفل الطلب وبدء التنفيذ", "callback_data": f"lock_order_{order_id}"}], [{"text": "💳 إرسال بيانات الدفع للعميل", "callback_data": f"provide_account_{order_id}"}]]}
+        payload = {'chat_id': ADMIN_ID, 'text': admin_alert, 'parse_mode': 'Markdown', 'reply_markup': json.dumps(reply_markup)}
+        requests.post(url, json=payload)
         del user_states[sender_phone]
 
     elif state == 'buy_egp_amount':
@@ -346,7 +354,10 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
         send_whatsapp_message(sender_phone, "🕒 *جارٍ تجهيز التحويل...*\n\nالرجاء الانتظار قليلاً، نحن نقوم الآن بتجهيز حساب (بنكك) لتقوم بالتحويل إليه لضمان أمان أموالك..." + FOOTER)
         
         admin_alert = f"🚨 *طلب حساب لشحن مصري (واتساب)!* `#{order_id}`\n\n👤 العميل: `{full_name}`\n📱 الهاتف: `+{sender_phone}`\n🔗 [💬 تواصل مع العميل مباشرة](https://wa.me/{sender_phone})\n\nالعميل يريد شحن `{order['amount']}` مصري لحساب `{client_egp_account}`\nسيدفع: `{order['total_sdg']}` جنيه سوداني.\n\nاضغط الزر أدناه لتزويده برقم حساب (بنكك) ليقوم بالتحويل عليه:"
-        notify_telegram_admin_action(admin_alert, order_id)
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        reply_markup = {"inline_keyboard": [[{"text": "🔒 قفل الطلب وبدء التنفيذ", "callback_data": f"lock_order_{order_id}"}], [{"text": "💳 إرسال بيانات الدفع للعميل", "callback_data": f"provide_account_{order_id}"}]]}
+        payload = {'chat_id': ADMIN_ID, 'text': admin_alert, 'parse_mode': 'Markdown', 'reply_markup': json.dumps(reply_markup)}
+        requests.post(url, json=payload)
         del user_states[sender_phone]
 
 @app.route('/webhook', methods=['GET', 'POST'])
