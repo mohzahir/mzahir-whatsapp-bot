@@ -427,29 +427,38 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
-        if request.args.get('hub.mode') == 'subscribe' and request.args.get('hub.verify_token') == VERIFY_TOKEN: return request.args.get('hub.challenge'), 200
+        if request.args.get('hub.mode') == 'subscribe' and request.args.get('hub.verify_token') == VERIFY_TOKEN: 
+            return request.args.get('hub.challenge'), 200
         return 'Forbidden', 403
 
     if request.method == 'POST':
         try:
             body = request.json
-            # ... (استخراج البيانات) ...
-            if 'messages' in value:
-                sender_phone = value['messages'][0]['from']
-                # إضافة سطر الالتقاط هنا:
-                log_lead(sender_phone, 'whatsapp')
+            
+            # 1. استخراج البيانات بالترتيب الصحيح أولاً لضمان وجود المتغيرات
             entry = body.get('entry', [])[0]
             changes = entry.get('changes', [])[0]
             value = changes.get('value', {})
             
+            # 2. التحقق من وجود رسائل داخل الـ value المعرّف للتو
             if 'messages' in value:
                 message_data = value['messages'][0]
                 sender_phone = message_data['from']
+                
+                # 3. تسجيل الليد في قاعدة البيانات فوراً
+                log_lead(sender_phone, 'whatsapp')
+                
+                # 4. استخراج تفاصيل الرسالة وتمريرها للمعالجة
                 msg_type = message_data.get('type')
                 msg_text = message_data['text']['body'] if msg_type == 'text' else ""
                 image_id = message_data['image']['id'] if msg_type == 'image' else None
+                
                 handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id)
-        except Exception: pass
+                
+        except Exception as e:
+            # نصيحة: طباعة الخطأ في الـ logs تساعدك دائماً على معرفة المشكلة بدلاً من pass الصامتة
+            print(f"❌ Error in webhook processing: {e}")
+            
         return jsonify({"status": "success"}), 200
 
 if __name__ == '__main__':
