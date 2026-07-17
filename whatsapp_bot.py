@@ -113,6 +113,21 @@ def get_currency_name(choice):
     }
     return mapping.get(choice, "العملة")
 
+def log_lead(sender_id, platform='whatsapp'):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # استخدام UPSERT لتحديث تاريخ آخر تواصل وزيادة عدد التفاعلات
+    cursor.execute('''
+        INSERT INTO leads (user_id, platform, last_contact_date, interaction_count)
+        VALUES (%s, %s, CURRENT_TIMESTAMP, 1)
+        ON CONFLICT (user_id) 
+        DO UPDATE SET 
+            last_contact_date = CURRENT_TIMESTAMP,
+            interaction_count = leads.interaction_count + 1
+    ''', (int(sender_id), platform))
+    conn.commit()
+    conn.close()
+
 def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
     global user_states
     msg_text = str(msg_text).strip() if msg_text else ""
@@ -418,6 +433,11 @@ def webhook():
     if request.method == 'POST':
         try:
             body = request.json
+            # ... (استخراج البيانات) ...
+            if 'messages' in value:
+                sender_phone = value['messages'][0]['from']
+                # إضافة سطر الالتقاط هنا:
+                log_lead(sender_phone, 'whatsapp')
             entry = body.get('entry', [])[0]
             changes = entry.get('changes', [])[0]
             value = changes.get('value', {})
