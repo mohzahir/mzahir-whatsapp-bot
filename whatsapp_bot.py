@@ -401,7 +401,8 @@ def handle_whatsapp_message(sender_phone, msg_text, msg_type, image_id=None):
             if choice == "6":
                 cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', (int(sender_phone), o_type, order['amount'], order['total_sdg_to_pay'], f"مصري: {order['client_bank']}", 'AWAITING_ACCOUNT', 'whatsapp'))
             else:
-                cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', (int(sender_phone), o_type, order['amount'], order['total_sdg'], f"بنك العميل: {order['client_bank']}", 'AWAITING_ACCOUNT', 'whatsapp'))
+                # 💡 تم التعديل هنا: استبدال order['total_sdg'] بـ order['total_receive'] لمنع الـ KeyError
+                cursor.execute('''INSERT INTO orders (user_id, order_type, amount, total_sdg, wallet_address, status, platform) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING order_id''', (int(sender_phone), o_type, order['amount'], order['total_receive'], f"بنك العميل: {order['client_bank']}", 'AWAITING_ACCOUNT', 'whatsapp'))
                  
             order_id = cursor.fetchone()[0]
             conn.commit(); conn.close()
